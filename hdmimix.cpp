@@ -20,7 +20,8 @@ public:
         count++;
         uint64_t current_time = get_current_time();
         if (current_time - last_print_time >= print_interval) {
-            std::cout << "Frequency: " << count * 1000 / (current_time - last_print_time) << " Hz" << std::endl;
+            float freq = count * 1000.0 / (current_time - last_print_time);
+            printf("Frequency: %.2fHz\n", freq);
             count = 0;
             last_print_time = current_time;
         }
@@ -64,7 +65,7 @@ int main(int argc, char** argv) {
         std::cerr << "Failed to open video device" << std::endl;
         return 1;
     }
-    
+
     // v4l2_device.on_data = debug_on_v4l2_data;
     
     v4l2_device.stream_on();
