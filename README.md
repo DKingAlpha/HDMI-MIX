@@ -14,7 +14,7 @@ RK3588 has special hardwares:
     * rk nv12/nv24 are composed of 2 cplanes, 1 mplanes (2 logical planes on 1 physical plane)
 2. drm hdmiout reports:
     1. PRIMARY: NV* not supported
-    2. OVERLAY/CURSOR NV* supported
+    2. OVERLAY/CURSOR: NV* supported
 
 ## what that means
 
@@ -28,13 +28,11 @@ RK3588 has special hardwares:
 3. drm: find a compatible overlay panel
 4. v4l2: on frame update call `drmModeSetPlane` to switch fb for panel.
 
-## how it works
-
-Pretty good!
+## Performance
 
 Theoretically there could be some stuttering due to blocking calling `drmModeSetPlane`,
 
-but in practice 4K@60Hz looks decent to me.
+but in practice 4K@60Hz LGTM!
 
 ## How to use
 

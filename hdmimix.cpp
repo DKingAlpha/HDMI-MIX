@@ -80,6 +80,19 @@ int main(int argc, char** argv) {
         // For each buffer, import the DMABUF and display it
         drm_device.display(buf.index);
         static FreqMonitor freq_monitor;
+
+        // draw something on the buffer.
+        // this can be slow! try using a cursor overlay instead.
+        /*
+        static int offset = 0;
+        for (int i=0; i<buf.mem[0].size/4; i++) {
+            int oi = offset + i;
+            buf.mem[0].ptr[oi] *= 2;
+        }
+        offset++;
+        offset %= drm_device.width * drm_device.height / 2;
+        */
+
         freq_monitor.increment();
     };
 
@@ -92,6 +105,8 @@ int main(int argc, char** argv) {
 
     drm_device.close();
     v4l2_device.close();
+
+    sleep(1); // dirty: give some time for deamon threads to finish
 
     return 0;
 }
