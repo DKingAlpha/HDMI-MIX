@@ -35,7 +35,7 @@ public:
     // Return the index of the framebuffer
     int import_dmabuf(int dmabuf_fd);
 
-    int create_cursor_buf();
+    int create_canvas_buf();
 
 enum class PlaneType {
     PLANE_TYPE_OVERLAY,
@@ -64,7 +64,7 @@ private:
     int plane_id_support_input_pixfmt = -1;
     PlaneType plane_type_support_input_pixfmt = PlaneType::PLANE_TYPE_PRIMARY;
 
-    int plane_id_cursor = -1;
+    int plane_id_canvas = -1;
     int pixfmt_cursor = 0;
     uint32_t dumb_buf_handle = 0;
 
@@ -74,9 +74,8 @@ private:
     std::vector<uint32_t> fb_ids;
     std::map<uint32_t, std::map<std::string, uint32_t>> panel_prop_ids;
 
-    int crtc_width = 0;
-    int crtc_height = 0;
+    // int crtc_width = 0;
+    // int crtc_height = 0;
 
-    uint64_t cursor_width = 0, cursor_height = 0;
     uint64_t support_dumb_buffer = 0;
 };

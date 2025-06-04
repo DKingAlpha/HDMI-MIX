@@ -8,8 +8,24 @@
 #include <sys/mman.h>
 #include <signal.h>
 
-#include <mutex>
-
+class TwoDimensionalBuffer {
+public:
+    TwoDimensionalBuffer(unsigned char* data, size_t size, int width, int height) 
+        : data(data), size(size), width(width), height(height) {
+    }
+    
+    unsigned char* get(int x, int y) {
+        if (x < 0 || x >= width || y < 0 || y >= height) {
+            return nullptr; // Out of bounds
+        }
+        return data + (y * width + x) * 4; // Assuming 4 bytes per pixel (ARGB)
+    }
+private:
+    int width;
+    int height;
+    unsigned char* data;
+    size_t size;
+};
 
 class FreqMonitor {
     std::string name;
@@ -79,12 +95,10 @@ int main(int argc, char** argv) {
         int index = drm_device.import_dmabuf(v4l2_device.buffers[i].mem[0].dma_fd);
     }
 
-    /*
-    if (drm_device.create_cursor_buf() < 0) {
+    if (drm_device.create_canvas_buf() < 0) {
         std::cerr << "Failed to create cursor buffer" << std::endl;
         return 1;
     }
-    */
 
     v4l2_device.on_data = [&drm_device](V4l2Device::user_buffers_t& buf, v4l2_buffer& vbuf) {
         // For each buffer, import the DMABUF and display it
@@ -92,10 +106,28 @@ int main(int argc, char** argv) {
 
         static FreqMonitor freq_monitor("Main");
         freq_monitor.increment();
+
+        TwoDimensionalBuffer buf2d (drm_device.dumb_buf_ptr, drm_device.dumb_buf_size, drm_device.width, drm_device.height);
+        memset(drm_device.dumb_buf_ptr, 0x00, drm_device.dumb_buf_size); // make transparent
+        // draw a pattern
+        static int count = 0;
+        count ++;
+        count %= 640;
+        for (int y = 0; y < 128; y++) {
+            for (int x = 0; x < 128; x++) {
+                unsigned char* pixel = buf2d.get(x+count, y+count);
+                if (pixel) {
+                    pixel[0] = count; // R
+                    pixel[1] = count * 2; // G
+                    pixel[2] = count * 3; // B
+                    pixel[3] = 0xFF;  // A
+                }
+            }
+        }
     };
 
     while(!caught_interruption) {
-        usleep(100000); // 100ms
+        usleep(10000); // 10ms
     }
 
     v4l2_device.on_data = nullptr;
