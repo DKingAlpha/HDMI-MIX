@@ -7,6 +7,12 @@
 #include <map>
 #include <xf86drmMode.h>
 
+enum class PlaneType {
+    PLANE_TYPE_PRIMARY,
+    PLANE_TYPE_OVERLAY,
+    PLANE_TYPE_CURSOR,
+};
+
 class DRMDevice {
 public:
     DRMDevice(std::string device, int width, int height, int pixfmt) : device(device), width(width), height(height), pixfmt(pixfmt) {
@@ -29,8 +35,15 @@ public:
     // Return the index of the framebuffer
     int import_dmabuf(int dmabuf_fd);
 
-    bool display(int index);
+    int create_cursor_buf();
 
+enum class PlaneType {
+    PLANE_TYPE_OVERLAY,
+    PLANE_TYPE_CURSOR,
+    PLANE_TYPE_PRIMARY
+};
+
+    bool display(int index);
 
     int width = 0;
     int height = 0;
@@ -38,16 +51,22 @@ public:
 
     std::string device;
 
+    unsigned char* dumb_buf_ptr = nullptr;
+    uint64_t dumb_buf_size = 0;
+
 private:
     bool open_not_closing_on_failure();
 
     int drm_fd = -1;
-    uint32_t handles[4] = {0}, pitches[4] = {0}, offsets[4] = {0};
-    uint64_t modifiers[4] = {0};
     uint32_t conn_id = 0;
     uint32_t crtc_id = 0;
 
-    int plane_id_support_fmt = -1;
+    int plane_id_support_input_pixfmt = -1;
+    PlaneType plane_type_support_input_pixfmt = PlaneType::PLANE_TYPE_PRIMARY;
+
+    int plane_id_cursor = -1;
+    int pixfmt_cursor = 0;
+    uint32_t dumb_buf_handle = 0;
 
     drmModeRes* resources = nullptr;
     drmModeConnector* connector = nullptr;
@@ -57,4 +76,7 @@ private:
 
     int crtc_width = 0;
     int crtc_height = 0;
+
+    uint64_t cursor_width = 0, cursor_height = 0;
+    uint64_t support_dumb_buffer = 0;
 };

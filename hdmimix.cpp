@@ -8,20 +8,24 @@
 #include <sys/mman.h>
 #include <signal.h>
 
+#include <mutex>
+
+
 class FreqMonitor {
+    std::string name;
 public:
-    int print_interval = 1000; // milliseconds
+    int interval_ms;
     uint64_t count = 0;
     uint64_t last_print_time = 0;
-    FreqMonitor() {
+    FreqMonitor(std::string name, int interval_ms = 5000): name(name), interval_ms(interval_ms) {
         last_print_time = get_current_time();
     }
     void increment() {
         count++;
         uint64_t current_time = get_current_time();
-        if (current_time - last_print_time >= print_interval) {
+        if (current_time - last_print_time >= interval_ms) {
             float freq = count * 1000.0 / (current_time - last_print_time);
-            printf("Frequency: %.2fHz\n", freq);
+            printf("Frequency: %s %.2fHz\n", name.c_str(), freq);
             count = 0;
             last_print_time = current_time;
         }
@@ -73,31 +77,25 @@ int main(int argc, char** argv) {
     DRMDevice drm_device("/dev/dri/card0", v4l2_device.width, v4l2_device.height, v4l2_device.pixfmt);
     for (int i=0; i<v4l2_device.buf_count; i++) {
         int index = drm_device.import_dmabuf(v4l2_device.buffers[i].mem[0].dma_fd);
-        drm_device.display(index);
     }
+
+    /*
+    if (drm_device.create_cursor_buf() < 0) {
+        std::cerr << "Failed to create cursor buffer" << std::endl;
+        return 1;
+    }
+    */
 
     v4l2_device.on_data = [&drm_device](V4l2Device::user_buffers_t& buf, v4l2_buffer& vbuf) {
         // For each buffer, import the DMABUF and display it
         drm_device.display(buf.index);
-        static FreqMonitor freq_monitor;
 
-        // draw something on the buffer.
-        // this can be slow! try using a cursor overlay instead.
-        /*
-        static int offset = 0;
-        for (int i=0; i<buf.mem[0].size/4; i++) {
-            int oi = offset + i;
-            buf.mem[0].ptr[oi] *= 2;
-        }
-        offset++;
-        offset %= drm_device.width * drm_device.height / 2;
-        */
-
+        static FreqMonitor freq_monitor("Main");
         freq_monitor.increment();
     };
 
     while(!caught_interruption) {
-        sleep(1);
+        usleep(100000); // 100ms
     }
 
     v4l2_device.on_data = nullptr;

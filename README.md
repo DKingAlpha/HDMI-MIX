@@ -11,7 +11,7 @@ RK3588 has special hardwares:
 1. v4l2 hdmirx reports:
     * capabilities: MPLANES | STREAMING_IO
     * pixel format: NV12 on 4k, NV24 on 1080p
-    * rk nv12/nv24 are composed of 2 cplanes, 1 mplanes (2 logical planes on 1 physical plane)
+    * rk NV12/NV24 are composed of 2 cplanes, 1 mplanes (2 logical planes on 1 physical plane)
 2. drm hdmiout reports:
     1. PRIMARY: NV* not supported
     2. OVERLAY/CURSOR: NV* supported
@@ -30,13 +30,12 @@ RK3588 has special hardwares:
 
 ## Performance
 
-Theoretically there could be some stuttering due to blocking calling `drmModeSetPlane`,
-
-but in practice 4K@60Hz LGTM!
+Smooth on 4K@60Hz!
 
 ## How to use
 
 1. kernel <= 6.1, large cma in kernel paramter like `cma=1024M`
+    * hdmirx is broken on kernel 6.1x !
 2. install `libv4l2-dev`, `libdrm-dev` and other missing dev dependencies.
 3. `make`
 4. run `hdmimix`.
