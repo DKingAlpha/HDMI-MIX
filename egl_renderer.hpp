@@ -10,6 +10,10 @@ public:
         : drm_fd(drm_fd), width(width), height(height), initialized(false){}
     
     ~EGLBufRenderer() {
+        close();
+    }
+
+    void close() {
         if (egl_display != EGL_NO_DISPLAY && egl_context != EGL_NO_CONTEXT) {
             eglDestroyContext(egl_display, egl_context);
             egl_context = EGL_NO_CONTEXT;

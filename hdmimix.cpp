@@ -64,7 +64,7 @@ int main(int argc, char** argv) {
         int index = drm_device.import_dmabuf(v4l2_device.buffers[i].index, v4l2_device.buffers[i].mem[0].dma_fd);
     }
 
-    // if (drm_device.create_canvas_buf() < 0) {
+    // if (drm_device.create_canvas_buf_dumb() < 0) {
     //     std::cerr << "Failed to create cursor buffer" << std::endl;
     //     return 1;
     // }
@@ -109,23 +109,24 @@ int main(int argc, char** argv) {
 
         static FreqMonitor freq_monitor("Main");
         freq_monitor.increment();
-
-        /*
-        */
     };
 
     while(!caught_interruption) {
         usleep(20*1000); // 20ms
+        break;
     }
 
     v4l2_device.on_data = nullptr;
     v4l2_device.stream_off();
+    usleep(100*1000); // 100ms to ensure all buffers are processed
+
+    renderer.close();
+    usleep(100*1000);
 
     drm_device.close();
+    usleep(100*1000);
+
     v4l2_device.close();
-
-    sleep(1); // dirty: give some time for deamon threads to finish
-
     return 0;
 }
 
