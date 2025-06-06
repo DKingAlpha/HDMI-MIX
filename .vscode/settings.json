@@ -63,6 +63,9 @@
         "eglplatform.h": "c",
         "khrplatform.h": "c",
         "cstring": "cpp",
-        "set": "cpp"
+        "set": "cpp",
+        "chrono": "cpp",
+        "iomanip": "cpp",
+        "sstream": "cpp"
     }
 }

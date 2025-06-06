@@ -95,7 +95,14 @@ public:
             std::cerr << "Failed to create EGL surface, err:" << std::hex << eglGetError() << std::endl;
             return false;
         }
-        egl_context = eglCreateContext(egl_display, config, EGL_NO_CONTEXT, nullptr);
+
+        // GBM as a service does not support 3.2 due to lack of extension KHR_create_context
+        EGLint context_attribs[] = {
+            EGL_CONTEXT_MAJOR_VERSION, 3,
+            EGL_CONTEXT_MINOR_VERSION, 1,
+            EGL_NONE
+        };
+        egl_context = eglCreateContext(egl_display, config, EGL_NO_CONTEXT, context_attribs);
         if (egl_context == EGL_NO_CONTEXT) {
             std::cerr << "Failed to create EGL context, err:" << std::hex << eglGetError() << std::endl;
             return false;

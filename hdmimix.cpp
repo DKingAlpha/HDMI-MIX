@@ -34,13 +34,17 @@ void debug_on_v4l2_data(V4l2Device::user_buffers_t& buf, v4l2_buffer& vbuf) {
     }
 };
 
-bool caught_interruption = false;
+bool run_loop = true;
 void signal_handler(int signum) {
     if (signum == SIGINT) {
-        caught_interruption = true;
+        run_loop = false;
         std::cout << "Caught signal " << signum << ", exiting..." << std::endl;
     }
 }
+
+extern void imgui_main_pre(int width, int height);
+extern void imgui_main_post();
+extern void imgui_main_on_frame();
 
 int main(int argc, char** argv) {
     struct sigaction sigact;
@@ -55,13 +59,9 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    // v4l2_device.on_data =void dump_config(EGLDisplay egl_display, EGLConfig config) debug_on_v4l2_data;
-    
-    v4l2_device.stream_on();
-
     DRMDevice drm_device("/dev/dri/card0", v4l2_device.width, v4l2_device.height, v4l2_device.pixfmt);
     for (int i=0; i<v4l2_device.buf_count; i++) {
-        int index = drm_device.import_dmabuf(v4l2_device.buffers[i].index, v4l2_device.buffers[i].mem[0].dma_fd);
+        drm_device.import_dmabuf(v4l2_device.buffers[i].index, v4l2_device.buffers[i].mem[0].dma_fd);
     }
 
     // if (drm_device.create_canvas_buf_dumb() < 0) {
@@ -74,17 +74,39 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    v4l2_device.on_data = [&drm_device, &renderer](V4l2Device::user_buffers_t& buf, v4l2_buffer& vbuf) {
-        static bool bound_context = false;
-        if (!bound_context) {
-            if (!renderer.bind_context_to_thread()) {
-                std::cerr << "Failed to bind EGL context to thread" << std::endl;
-                return;
-            }
-            bound_context = true;
+    if (!renderer.bind_context_to_thread()) {
+        std::cerr << "Failed to bind EGL context to thread" << std::endl;
+        return 1;
+    }
+
+    const char* version = (const char*)glGetString(GL_VERSION);
+    if (!version) {
+        printf("OpenGL not initialized! EGL error: 0x%X\n", eglGetError());
+    }
+    printf("OpenGL version: %s\n", version);
+
+    imgui_main_pre(v4l2_device.width, v4l2_device.height);
+
+
+    v4l2_device.stream_on(run_loop, [&drm_device, &renderer](V4l2Device::user_buffers_t& buf, v4l2_buffer& vbuf) {
+        static FreqMonitor freq_monitor("Main");
+        static FrameJitterMeasurer jitterMeasurer(60.0);
+        freq_monitor.increment();
+        jitterMeasurer.markFrame();
+
+        static auto lastPrint = std::chrono::high_resolution_clock::now();
+        auto now = std::chrono::high_resolution_clock::now();
+        if (std::chrono::duration<double>(now - lastPrint).count() >= 1.0) {
+            auto metrics = jitterMeasurer.getMetrics();
+            std::cout << "-----------------------------\n"
+                      << "FPS: " << metrics.averageFps << "\n"
+                      << "Jitter: " << metrics.jitterRate << "%\n"
+                      << "MaxDev: " << metrics.maxDeviation << "ms\n"
+                      << "StdDev: " << metrics.stdDev << "ms\n\n";
+            lastPrint = now;
         }
 
-        test_draw();
+        imgui_main_on_frame();
         renderer.prepare_read();
 
         gbm_bo* cur_bo = renderer.read_lock();
@@ -106,17 +128,10 @@ int main(int argc, char** argv) {
         }
         
         renderer.read_unlock(cur_bo);
+    });
 
-        static FreqMonitor freq_monitor("Main");
-        freq_monitor.increment();
-    };
+    imgui_main_post();
 
-    while(!caught_interruption) {
-        usleep(20*1000); // 20ms
-        break;
-    }
-
-    v4l2_device.on_data = nullptr;
     v4l2_device.stream_off();
     usleep(100*1000); // 100ms to ensure all buffers are processed
 
@@ -127,50 +142,52 @@ int main(int argc, char** argv) {
     usleep(100*1000);
 
     v4l2_device.close();
+    usleep(100*1000);
+    
     return 0;
 }
 
 
 void dump_config(EGLDisplay egl_display, EGLConfig config) {
-		// dump attributes of each config
-		EGLint attribs[16]{};
-		eglGetConfigAttrib(egl_display, config, EGL_RED_SIZE, &attribs[0]);
-		eglGetConfigAttrib(egl_display, config, EGL_GREEN_SIZE, &attribs[1]);
-		eglGetConfigAttrib(egl_display, config, EGL_BLUE_SIZE, &attribs[2]);
-		eglGetConfigAttrib(egl_display, config, EGL_ALPHA_SIZE, &attribs[3]);
+    // dump attributes of each config
+    EGLint attribs[16]{};
+    eglGetConfigAttrib(egl_display, config, EGL_RED_SIZE, &attribs[0]);
+    eglGetConfigAttrib(egl_display, config, EGL_GREEN_SIZE, &attribs[1]);
+    eglGetConfigAttrib(egl_display, config, EGL_BLUE_SIZE, &attribs[2]);
+    eglGetConfigAttrib(egl_display, config, EGL_ALPHA_SIZE, &attribs[3]);
 
-		eglGetConfigAttrib(egl_display, config, EGL_BUFFER_SIZE, &attribs[4]);
-		eglGetConfigAttrib(egl_display, config, EGL_DEPTH_SIZE, &attribs[5]);
+    eglGetConfigAttrib(egl_display, config, EGL_BUFFER_SIZE, &attribs[4]);
+    eglGetConfigAttrib(egl_display, config, EGL_DEPTH_SIZE, &attribs[5]);
 
 
-		eglGetConfigAttrib(egl_display, config, EGL_CONFIG_ID, &attribs[6]);
-		eglGetConfigAttrib(egl_display, config, EGL_LEVEL, &attribs[7]);
-		eglGetConfigAttrib(egl_display, config, EGL_RENDERABLE_TYPE, &attribs[8]);
-		eglGetConfigAttrib(egl_display, config, EGL_SURFACE_TYPE, &attribs[9]);
+    eglGetConfigAttrib(egl_display, config, EGL_CONFIG_ID, &attribs[6]);
+    eglGetConfigAttrib(egl_display, config, EGL_LEVEL, &attribs[7]);
+    eglGetConfigAttrib(egl_display, config, EGL_RENDERABLE_TYPE, &attribs[8]);
+    eglGetConfigAttrib(egl_display, config, EGL_SURFACE_TYPE, &attribs[9]);
 
-		eglGetConfigAttrib(egl_display, config, EGL_NATIVE_RENDERABLE, &attribs[10]);
-		eglGetConfigAttrib(egl_display, config, EGL_NATIVE_VISUAL_ID, &attribs[11]);
-		eglGetConfigAttrib(egl_display, config, EGL_NATIVE_VISUAL_TYPE, &attribs[12]);
+    eglGetConfigAttrib(egl_display, config, EGL_NATIVE_RENDERABLE, &attribs[10]);
+    eglGetConfigAttrib(egl_display, config, EGL_NATIVE_VISUAL_ID, &attribs[11]);
+    eglGetConfigAttrib(egl_display, config, EGL_NATIVE_VISUAL_TYPE, &attribs[12]);
 
-		char visual_id[5]{};
-		memcpy(visual_id, &attribs[11], 4);
-		visual_id[4] = '\0';
+    char visual_id[5]{};
+    memcpy(visual_id, &attribs[11], 4);
+    visual_id[4] = '\0';
 
-		std::cout
-			<< "Config ID: " << attribs[6] << ", "
-			<< "RGBA: " << attribs[0] << ":"
-			<< attribs[1] << ":"
-			<< attribs[2] << ":"
-			<< attribs[3] << ", "
-			<< "Buffer: " << attribs[4] << ", "
-			<< "Depth: " << attribs[5] << ", "
-			<< "Level: " << attribs[7] << ", "
-			<< "Renderable Type: " << std::hex << attribs[8] << ", "
-			<< "Surface Type: " << std::hex << attribs[9] << ", "
-			// << "Native Renderable: " << attribs[10] << ", "
-			<< "Visual ID: " << visual_id << ", "
-			<< "Visual Type: " <<  std::hex << attribs[12]
-			<< std::endl;
+    std::cout
+        << "Config ID: " << attribs[6] << ", "
+        << "RGBA: " << attribs[0] << ":"
+        << attribs[1] << ":"
+        << attribs[2] << ":"
+        << attribs[3] << ", "
+        << "Buffer: " << attribs[4] << ", "
+        << "Depth: " << attribs[5] << ", "
+        << "Level: " << attribs[7] << ", "
+        << "Renderable Type: " << std::hex << attribs[8] << ", "
+        << "Surface Type: " << std::hex << attribs[9] << ", "
+        // << "Native Renderable: " << attribs[10] << ", "
+        << "Visual ID: " << visual_id << ", "
+        << "Visual Type: " <<  std::hex << attribs[12]
+        << std::endl;
 }
 
 

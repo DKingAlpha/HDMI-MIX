@@ -157,7 +157,7 @@ bool V4l2Device::close() {
   return true;
 }
 
-bool V4l2Device::stream_on() { 
+bool V4l2Device::stream_on(bool& run_loop, std::function<void(user_buffers_t&, v4l2_buffer&)> on_data) { 
     if (is_streaming) {
         return true;
     }
@@ -166,37 +166,33 @@ bool V4l2Device::stream_on() {
         std::cerr << "Failed to start streaming" << std::endl;
         return false;
     }
+
     is_streaming = true;
-
-    // set up a daemon thread
-    std::thread([this]() {
-        while(this->is_open()) {
-            // process data
-            v4l2_buffer vbuf{};
-            vbuf.type = is_mplane ? V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE : V4L2_BUF_TYPE_VIDEO_CAPTURE;
-            vbuf.memory = V4L2_MEMORY_MMAP;
-            std::vector<v4l2_plane> planes(buffers[0].num_planes());
-            vbuf.m.planes = planes.data();
-            vbuf.length = buffers[0].num_planes();
-            // this will block until a buffer is available
-            if(ioctl(v4l2_fd, VIDIOC_DQBUF, &vbuf)) {
-                if (!is_streaming) {
-                    break;
-                }
-                std::cerr << "Failed to dequeue buffer: " << strerror(errno) << std::endl;
-                continue;
+    while(run_loop && this->is_open()) {
+        // process data
+        v4l2_buffer vbuf{};
+        vbuf.type = is_mplane ? V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE : V4L2_BUF_TYPE_VIDEO_CAPTURE;
+        vbuf.memory = V4L2_MEMORY_MMAP;
+        std::vector<v4l2_plane> planes(buffers[0].num_planes());
+        vbuf.m.planes = planes.data();
+        vbuf.length = buffers[0].num_planes();
+        // this will block until a buffer is available
+        if(ioctl(v4l2_fd, VIDIOC_DQBUF, &vbuf)) {
+            if (!is_streaming) {
+                break;
             }
-            if (on_data) {
-                on_data(buffers[vbuf.index], vbuf);
-            }
-            // queue the buffer back
-            if (ioctl(v4l2_fd, VIDIOC_QBUF, &vbuf)) {
-                std::cerr << "Failed to queue buffer: " << strerror(errno) << std::endl;
-                continue;
-            }
+            std::cerr << "Failed to dequeue buffer: " << strerror(errno) << std::endl;
+            continue;
         }
-    }).detach();
-
+        if (on_data) {
+            on_data(buffers[vbuf.index], vbuf);
+        }
+        // queue the buffer back
+        if (ioctl(v4l2_fd, VIDIOC_QBUF, &vbuf)) {
+            std::cerr << "Failed to queue buffer: " << strerror(errno) << std::endl;
+            continue;
+        }
+    }
     return true;
 }
 

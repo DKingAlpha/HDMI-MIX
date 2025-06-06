@@ -127,6 +127,8 @@ bool DRMDevice::open_not_closing_on_failure() {
     drmModeFreeCrtc(crtc_info);
     */
 
+    printf("Plane ID: overlay=%d (for hdmi passthrough), primary=%d (unused canvas)\n", plane_id_support_input_pixfmt, plane_id_canvas);
+
     return true;
 
 }
@@ -156,14 +158,14 @@ bool DRMDevice::close() {
         canvas_fb_ids.erase(it);
     }
 
-    if (dumb_buf_handle) {
-        drmModeDestroyDumbBuffer(drm_fd, dumb_buf_handle);
-        dumb_buf_handle = 0;
-    }
-
     if (dumb_buf_ptr) {
         munmap(dumb_buf_ptr, dumb_buf_size);
         dumb_buf_ptr = nullptr;
+    }
+
+    if (dumb_buf_handle) {
+        drmModeDestroyDumbBuffer(drm_fd, dumb_buf_handle);
+        dumb_buf_handle = 0;
     }
 
     if (drm_fd >= 0) {
