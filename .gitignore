@@ -1,2 +1,7 @@
 /hdmimix
 *.log
+*.o
+/imgui_addon/example_passthrough_opengl3/example_passthrough_opengl3
+/imgui
+/imgui.ini
+/main
