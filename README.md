@@ -21,10 +21,10 @@ RK3588 has special hardwares:
 
 ## what that means
 
-1. we can't use `drmModeSetCrtc` because this binds fb to primary plane, where pixel format NV* are not supported.
+1. we can't use `drmModeSetCrtc` for HDMI-IN DMABUF because this API binds fb to primary plane, where pixel format NV* are not supported.
 2. we only have a few overlay panels to render out HDMI-IN DMABUF. drm pageflip is not supported on non-primary planes.
 3. primitively, we can use bind a dumb buffer to 'primary' panel as canvas, to render floating UI (a real overlay), and change zpos to top it. but we only have a raw dumb buffer to manually draw on. This is dumb.
-4. alternatively, we can go with offline rendering, with GBM/EGL/GLES3.1, and import the surface buffer to DRM as a framebuffer, then top it. with hardware acceleration and OpenGL support, so we can render GUI softwares on it!
+4. alternatively, we can go with offline rendering, with GBM/EGL/GLES3.1, and import the surface buffer to DRM as a framebuffer, then top it. With hardware acceleration and OpenGL support, we can render GUI softwares on it!
 
 ## what this does
 
