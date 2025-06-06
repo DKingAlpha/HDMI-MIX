@@ -13,7 +13,10 @@
                 "${fileDirname}/${fileBasenameNoExtension}",
                 "-I/usr/include/libdrm",
                 "-lv4l2",
-                "-ldrm"
+                "-ldrm",
+                "-lgbm",
+                "-lEGL",
+                "-lGL"
             ],
             "options": {
                 "cwd": "${fileDirname}"

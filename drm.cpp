@@ -3,10 +3,12 @@
 #include <iostream>
 #include <unistd.h>
 #include <string.h>
+#include <assert.h>
 #include <xf86drm.h>
 #include <xf86drmMode.h>
 #include <libdrm/drm_fourcc.h>
 #include <sys/mman.h>
+
 
 bool DRMDevice::open_not_closing_on_failure() {
     // 1. Open the DRM device
@@ -144,9 +146,14 @@ bool DRMDevice::close() {
         resources = nullptr;
     }
 
-    while(!fb_ids.empty()) {
-        drmModeRmFB(drm_fd, fb_ids.back());
-        fb_ids.pop_back();
+    while(!passthrough_fd_ids.empty()) {
+        drmModeRmFB(drm_fd, passthrough_fd_ids.back());
+        passthrough_fd_ids.pop_back();
+    }
+    while (!canvas_fb_ids.empty()) {
+        auto it = canvas_fb_ids.begin();
+        drmModeRmFB(drm_fd, it->second);
+        canvas_fb_ids.erase(it);
     }
 
     if (dumb_buf_handle) {
@@ -167,7 +174,9 @@ bool DRMDevice::close() {
     return true;
 }
 
-int DRMDevice::import_dmabuf(int dmabuf_fd) {
+int DRMDevice::import_dmabuf(int index, int dmabuf_fd) {
+    assert(index == passthrough_fd_ids.size());
+    
     if (pixfmt != DRM_FORMAT_NV12 && pixfmt != DRM_FORMAT_NV24) {
         std::cerr << "Unsupported pixel format: " << pixfmt << std::endl;
         return -1;
@@ -211,42 +220,42 @@ int DRMDevice::import_dmabuf(int dmabuf_fd) {
         fprintf(stderr, "Failed to add FB: %s\n", strerror(-ret));
         return -1;
     }
-    fb_ids.push_back(fb_id);
+    passthrough_fd_ids.push_back(fb_id);
 
     printf("Successfully created FB with ID %u\n", fb_id);
-    return fb_ids.size() - 1;
+    return passthrough_fd_ids.size() - 1;
 }
 
-int DRMDevice::create_canvas_buf() {
+uint32_t DRMDevice::create_canvas_buf_dumb() {
     if (support_dumb_buffer == 0) {
         std::cerr << "Dumb buffer support not available" << std::endl;
-        return -1;
+        return 0;
     }
 
     if (plane_id_canvas < 0) {
         std::cerr << "No canvas plane available" << std::endl;
-        return -1;
+        return 0;
     }
 
     uint32_t canvas_pitch = width * 4; // Assuming ARGB8888 format
     int ret = drmModeCreateDumbBuffer(drm_fd, width, height, 32, 0, &dumb_buf_handle, &canvas_pitch, &dumb_buf_size);
     if (ret) {
         std::cerr << "Failed to create dumb buffer: " << strerror(-ret) << std::endl;
-        return -1;
+        return 0;
     }
 
     uint64_t mmap_offset = 0;
     ret = drmModeMapDumbBuffer(drm_fd, dumb_buf_handle, &mmap_offset);
     if (ret) {
         std::cerr << "Failed to map dumb buffer: " << strerror(-ret) << std::endl;
-        return -1;
+        return 0;
     }
 
     dumb_buf_ptr = static_cast<unsigned char*>(mmap(nullptr, dumb_buf_size, PROT_READ | PROT_WRITE, MAP_SHARED, drm_fd, mmap_offset));
     if (dumb_buf_ptr == MAP_FAILED) {
         dumb_buf_ptr = nullptr;
         std::cerr << "Failed to mmap dumb buffer: " << strerror(errno) << std::endl;
-        return -1;
+        return 0;
     }
     memset(dumb_buf_ptr, 0, dumb_buf_size); // make transparent
 
@@ -267,10 +276,10 @@ int DRMDevice::create_canvas_buf() {
     
     if (ret) {
         std::cerr << "Failed to create canvas framebuffer: " << strerror(-ret) << std::endl;
-        return -1;
+        return 0;
     }
 
-    fb_ids.push_back(canvas_fb_id);
+    canvas_fb_ids[nullptr] = canvas_fb_id;
 
     drmModeModeInfo* mode = nullptr;
 	for (int i = 0; i < connector->count_modes; ++i) {
@@ -281,16 +290,67 @@ int DRMDevice::create_canvas_buf() {
     }
 	drmModeSetCrtc(drm_fd, crtc_id, canvas_fb_id, 0, 0, &conn_id, 1, mode);
 
+    return canvas_fb_id;
+}
+
+
+uint32_t DRMDevice::import_canvas_buf_bo(gbm_bo* bo)
+{
+    if (!bo) {
+        std::cerr << "Invalid GBM buffer object" << std::endl;
+        return 0;
+    }
+    auto it = canvas_fb_ids.find(bo);
+    if (it != canvas_fb_ids.end()) {
+        return it->second;
+    }
+    std::cout << "Importing canvas buffer object: " << bo << std::endl;
+
+    // if prev bo locked, new bo will be returned
+    gbm_bo_handle bo_handle = gbm_bo_get_handle(bo);
+    uint32_t canvas_pitch = gbm_bo_get_stride(bo);
+
+    uint32_t canvas_fb_id = 0;
+    uint64_t canvas_modifiers = DRM_FORMAT_MOD_LINEAR;
+    uint32_t fb2_offset = 0;
+
+    uint32_t handles[4] = {bo_handle.u32, 0, 0, 0};
+    uint32_t pitches[4] = {canvas_pitch, 0, 0, 0};
+    uint32_t offsets[4] = {fb2_offset, 0, 0, 0};
+    uint64_t modifiers[4] = {canvas_modifiers, 0, 0, 0};
+    int ret = drmModeAddFB2WithModifiers(drm_fd, width, height,
+                                         DRM_FORMAT_ARGB8888,
+                                         handles, pitches, offsets,
+                                         modifiers, &canvas_fb_id,
+                                         DRM_MODE_FB_MODIFIERS);
+    
+    if (ret) {
+        std::cerr << "Failed to create canvas framebuffer: " << strerror(-ret) << std::endl;
+        return 0;
+    }
+
+    canvas_fb_ids[bo] = canvas_fb_id;
+
+    drmModeModeInfo* mode = nullptr;
+	for (int i = 0; i < connector->count_modes; ++i) {
+        mode = &connector->modes[i];
+        if (mode->hdisplay == width && mode->vdisplay == height) {
+            break;
+        }
+    }
+
+	drmModeSetCrtc(drm_fd, crtc_id, canvas_fb_id, 0, 0, &conn_id, 1, mode);
+
 
     drmModeAtomicReqPtr req = drmModeAtomicAlloc();
     if (!req) {
         std::cerr << "Failed to allocate atomic request" << std::endl;
-        return false;
+        return 0;
     }
 
     uint32_t plane_id = plane_id_canvas;
     drmModeAtomicAddProperty(req, plane_id, panel_prop_ids[plane_id]["CRTC_ID"], crtc_id);
-    drmModeAtomicAddProperty(req, plane_id, panel_prop_ids[plane_id]["FB_ID"], fb_ids.back());
+    drmModeAtomicAddProperty(req, plane_id, panel_prop_ids[plane_id]["FB_ID"], canvas_fb_id);
     drmModeAtomicAddProperty(req, plane_id, panel_prop_ids[plane_id]["CRTC_X"], 0);
     drmModeAtomicAddProperty(req, plane_id, panel_prop_ids[plane_id]["CRTC_Y"], 0);
     drmModeAtomicAddProperty(req, plane_id, panel_prop_ids[plane_id]["CRTC_W"], width);
@@ -301,27 +361,27 @@ int DRMDevice::create_canvas_buf() {
     drmModeAtomicAddProperty(req, plane_id, panel_prop_ids[plane_id]["SRC_H"], height << 16);
     drmModeAtomicAddProperty(req, plane_id, panel_prop_ids[plane_id]["CRTC_VISIBLE"], 1);
     // alpha
-    drmModeAtomicAddProperty(req, plane_id, panel_prop_ids[plane_id]["alpha"], 65535);
+    drmModeAtomicAddProperty(req, plane_id, panel_prop_ids[plane_id]["alpha"], 30000);
     drmModeAtomicAddProperty(req, plane_id, panel_prop_ids[plane_id]["zpos"], 11);
     ret = drmModeAtomicCommit(drm_fd, req, DRM_MODE_ATOMIC_ALLOW_MODESET | DRM_MODE_ATOMIC_NONBLOCK, nullptr);
     drmModeAtomicFree(req);
 
     if (ret < 0) {
         std::cerr << "Failed to commit atomic request for canvas plane: " << strerror(-ret) << std::endl;
-        return -1;
+        return 0;
     }
 
-    return fb_ids.size() - 1;
+    return canvas_fb_id;
 }
 
-bool DRMDevice::display(int index) {
-    if (fb_ids.empty()) {
+bool DRMDevice::display(int index, uint32_t canvas_fb_id) {
+    if (passthrough_fd_ids.empty()) {
         std::cerr << "No framebuffer IDs available" << std::endl;
         return false;
     }
 
     /*
-    int ret = drmModeSetPlane(drm_fd, plane_id_support_input_pixfmt, crtc_id, fb_ids[index], 0,
+    int ret = drmModeSetPlane(drm_fd, plane_id_support_input_pixfmt, crtc_id, passthrough_fd_ids[index], 0,
         0, 0, width, height,
         0, 0, width << 16, height << 16);
     */
@@ -330,33 +390,67 @@ bool DRMDevice::display(int index) {
     
     int ret = 0;
 
-    drmModeAtomicReqPtr req = drmModeAtomicAlloc();
-    if (!req) {
-        std::cerr << "Failed to allocate atomic request" << std::endl;
-        return false;
+    if (index != cur_passthrough_fd_index) {
+        cur_passthrough_fd_index = index;
+        drmModeAtomicReqPtr req = drmModeAtomicAlloc();
+        if (!req) {
+            std::cerr << "Failed to allocate atomic request" << std::endl;
+            return false;
+        }
+        uint32_t plane_id = plane_id_support_input_pixfmt;
+        drmModeAtomicAddProperty(req, plane_id, panel_prop_ids[plane_id]["CRTC_ID"], crtc_id);
+        drmModeAtomicAddProperty(req, plane_id, panel_prop_ids[plane_id]["FB_ID"], passthrough_fd_ids[index]);
+        drmModeAtomicAddProperty(req, plane_id, panel_prop_ids[plane_id]["CRTC_X"], 0);
+        drmModeAtomicAddProperty(req, plane_id, panel_prop_ids[plane_id]["CRTC_Y"], 0);
+        drmModeAtomicAddProperty(req, plane_id, panel_prop_ids[plane_id]["CRTC_W"], width);
+        drmModeAtomicAddProperty(req, plane_id, panel_prop_ids[plane_id]["CRTC_H"], height);
+        drmModeAtomicAddProperty(req, plane_id, panel_prop_ids[plane_id]["SRC_X"], 0);
+        drmModeAtomicAddProperty(req, plane_id, panel_prop_ids[plane_id]["SRC_Y"], 0);
+        drmModeAtomicAddProperty(req, plane_id, panel_prop_ids[plane_id]["SRC_W"], width << 16);
+        drmModeAtomicAddProperty(req, plane_id, panel_prop_ids[plane_id]["SRC_H"], height << 16);
+        drmModeAtomicAddProperty(req, plane_id, panel_prop_ids[plane_id]["CRTC_VISIBLE"], 1);
+        // alpha
+        drmModeAtomicAddProperty(req, plane_id, panel_prop_ids[plane_id]["alpha"], 65535);
+        drmModeAtomicAddProperty(req, plane_id, panel_prop_ids[plane_id]["zpos"], 10);
+        ret = drmModeAtomicCommit(drm_fd, req, DRM_MODE_ATOMIC_ALLOW_MODESET | DRM_MODE_ATOMIC_NONBLOCK, nullptr);
+        drmModeAtomicFree(req);
+        if (ret < 0 && ret != -EBUSY) {
+            // a few EBUSY is normal.
+            std::cerr << "Failed to commit atomic request: " << strerror(-ret) << std::endl;
+            return false;
+        }
     }
-    uint32_t plane_id = plane_id_support_input_pixfmt;
-    drmModeAtomicAddProperty(req, plane_id, panel_prop_ids[plane_id]["CRTC_ID"], crtc_id);
-    drmModeAtomicAddProperty(req, plane_id, panel_prop_ids[plane_id]["FB_ID"], fb_ids[index]);
-    drmModeAtomicAddProperty(req, plane_id, panel_prop_ids[plane_id]["CRTC_X"], 0);
-    drmModeAtomicAddProperty(req, plane_id, panel_prop_ids[plane_id]["CRTC_Y"], 0);
-    drmModeAtomicAddProperty(req, plane_id, panel_prop_ids[plane_id]["CRTC_W"], width);
-    drmModeAtomicAddProperty(req, plane_id, panel_prop_ids[plane_id]["CRTC_H"], height);
-    drmModeAtomicAddProperty(req, plane_id, panel_prop_ids[plane_id]["SRC_X"], 0);
-    drmModeAtomicAddProperty(req, plane_id, panel_prop_ids[plane_id]["SRC_Y"], 0);
-    drmModeAtomicAddProperty(req, plane_id, panel_prop_ids[plane_id]["SRC_W"], width << 16);
-    drmModeAtomicAddProperty(req, plane_id, panel_prop_ids[plane_id]["SRC_H"], height << 16);
-    drmModeAtomicAddProperty(req, plane_id, panel_prop_ids[plane_id]["CRTC_VISIBLE"], 1);
-    // alpha
-    drmModeAtomicAddProperty(req, plane_id, panel_prop_ids[plane_id]["alpha"], 65535);
-    drmModeAtomicAddProperty(req, plane_id, panel_prop_ids[plane_id]["zpos"], 0);
-    ret = drmModeAtomicCommit(drm_fd, req, DRM_MODE_ATOMIC_ALLOW_MODESET | DRM_MODE_ATOMIC_NONBLOCK, nullptr);
-    drmModeAtomicFree(req);
 
-    if (ret < 0 && ret != -EBUSY) {
-        // a few EBUSY is normal.
-        std::cerr << "Failed to commit atomic request: " << strerror(-ret) << std::endl;
-        return false;
+    if (true && canvas_fb_id != 0 && canvas_fb_id != cur_canvas_fb_id) {
+        cur_canvas_fb_id = canvas_fb_id;
+        drmModeAtomicReqPtr req = drmModeAtomicAlloc();
+        if (!req) {
+            std::cerr << "Failed to allocate atomic request" << std::endl;
+            return false;
+        }
+        uint32_t plane_id = plane_id_support_input_pixfmt;
+        drmModeAtomicAddProperty(req, plane_id, panel_prop_ids[plane_id]["CRTC_ID"], crtc_id);
+        drmModeAtomicAddProperty(req, plane_id, panel_prop_ids[plane_id]["FB_ID"], canvas_fb_id);
+        drmModeAtomicAddProperty(req, plane_id, panel_prop_ids[plane_id]["CRTC_X"], 0);
+        drmModeAtomicAddProperty(req, plane_id, panel_prop_ids[plane_id]["CRTC_Y"], 0);
+        drmModeAtomicAddProperty(req, plane_id, panel_prop_ids[plane_id]["CRTC_W"], width);
+        drmModeAtomicAddProperty(req, plane_id, panel_prop_ids[plane_id]["CRTC_H"], height);
+        drmModeAtomicAddProperty(req, plane_id, panel_prop_ids[plane_id]["SRC_X"], 0);
+        drmModeAtomicAddProperty(req, plane_id, panel_prop_ids[plane_id]["SRC_Y"], 0);
+        drmModeAtomicAddProperty(req, plane_id, panel_prop_ids[plane_id]["SRC_W"], width << 16);
+        drmModeAtomicAddProperty(req, plane_id, panel_prop_ids[plane_id]["SRC_H"], height << 16);
+        drmModeAtomicAddProperty(req, plane_id, panel_prop_ids[plane_id]["CRTC_VISIBLE"], 1);
+        // alpha
+        drmModeAtomicAddProperty(req, plane_id, panel_prop_ids[plane_id]["alpha"], 65535);
+        drmModeAtomicAddProperty(req, plane_id, panel_prop_ids[plane_id]["zpos"], 11);
+        ret = drmModeAtomicCommit(drm_fd, req, DRM_MODE_ATOMIC_ALLOW_MODESET | DRM_MODE_ATOMIC_NONBLOCK, nullptr);
+        drmModeAtomicFree(req);
+        if (ret < 0 && ret != -EBUSY) {
+            // a few EBUSY is normal.
+            std::cerr << "Failed to commit atomic request: " << strerror(-ret) << std::endl;
+            return false;
+        }
     }
+
     return true;
 }

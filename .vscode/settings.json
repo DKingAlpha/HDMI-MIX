@@ -58,6 +58,11 @@
         "stop_token": "cpp",
         "map": "cpp",
         "condition_variable": "cpp",
-        "mutex": "cpp"
+        "mutex": "cpp",
+        "egl.h": "c",
+        "eglplatform.h": "c",
+        "khrplatform.h": "c",
+        "cstring": "cpp",
+        "set": "cpp"
     }
 }

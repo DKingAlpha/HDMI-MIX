@@ -8,50 +8,17 @@
 #include <sys/mman.h>
 #include <signal.h>
 
-class TwoDimensionalBuffer {
-public:
-    TwoDimensionalBuffer(unsigned char* data, size_t size, int width, int height) 
-        : data(data), size(size), width(width), height(height) {
-    }
-    
-    unsigned char* get(int x, int y) {
-        if (x < 0 || x >= width || y < 0 || y >= height) {
-            return nullptr; // Out of bounds
-        }
-        return data + (y * width + x) * 4; // Assuming 4 bytes per pixel (ARGB)
-    }
-private:
-    int width;
-    int height;
-    unsigned char* data;
-    size_t size;
-};
+#include "egl_renderer.hpp"
+#include "helper.hpp"
+#include <EGL/egl.h>
+#include <gbm.h>
+#include <GL/gl.h>
+#include <GL/glx.h>
+#include <GL/glxext.h>
 
-class FreqMonitor {
-    std::string name;
-public:
-    int interval_ms;
-    uint64_t count = 0;
-    uint64_t last_print_time = 0;
-    FreqMonitor(std::string name, int interval_ms = 5000): name(name), interval_ms(interval_ms) {
-        last_print_time = get_current_time();
-    }
-    void increment() {
-        count++;
-        uint64_t current_time = get_current_time();
-        if (current_time - last_print_time >= interval_ms) {
-            float freq = count * 1000.0 / (current_time - last_print_time);
-            printf("Frequency: %s %.2fHz\n", name.c_str(), freq);
-            count = 0;
-            last_print_time = current_time;
-        }
-    }
-    uint64_t get_current_time() {
-        struct timespec ts;
-        clock_gettime(CLOCK_MONOTONIC, &ts);
-        return ts.tv_sec * 1000 + ts.tv_nsec / 1000000; // milliseconds
-    }
-};
+void dump_config(EGLDisplay egl_display, EGLConfig config);
+void test_draw();
+void test_draw_dumb(DRMDevice& drm_device);
 
 void debug_on_v4l2_data(V4l2Device::user_buffers_t& buf, v4l2_buffer& vbuf) {
     std::cout << "Buffer index: " << buf.index << std::endl;
@@ -80,54 +47,75 @@ int main(int argc, char** argv) {
     sigact.sa_handler = signal_handler;
     
     sigaction(SIGINT, &sigact, nullptr);
+    // single buffer can cause screen tearing, because drm may be reading dirty buffer
+    // so we use multiple buffers
     V4l2Device v4l2_device("/dev/video0", 4);
     if (!v4l2_device.is_open()) {
         std::cerr << "Failed to open video device" << std::endl;
         return 1;
     }
 
-    // v4l2_device.on_data = debug_on_v4l2_data;
+    // v4l2_device.on_data =void dump_config(EGLDisplay egl_display, EGLConfig config) debug_on_v4l2_data;
     
     v4l2_device.stream_on();
 
     DRMDevice drm_device("/dev/dri/card0", v4l2_device.width, v4l2_device.height, v4l2_device.pixfmt);
     for (int i=0; i<v4l2_device.buf_count; i++) {
-        int index = drm_device.import_dmabuf(v4l2_device.buffers[i].mem[0].dma_fd);
+        int index = drm_device.import_dmabuf(v4l2_device.buffers[i].index, v4l2_device.buffers[i].mem[0].dma_fd);
     }
 
-    if (drm_device.create_canvas_buf() < 0) {
-        std::cerr << "Failed to create cursor buffer" << std::endl;
+    // if (drm_device.create_canvas_buf() < 0) {
+    //     std::cerr << "Failed to create cursor buffer" << std::endl;
+    //     return 1;
+    // }
+
+    EGLBufRenderer renderer(drm_device.drm_fd, v4l2_device.width, v4l2_device.height);
+    if(!renderer.initialize()) {
         return 1;
     }
 
-    v4l2_device.on_data = [&drm_device](V4l2Device::user_buffers_t& buf, v4l2_buffer& vbuf) {
-        // For each buffer, import the DMABUF and display it
-        drm_device.display(buf.index);
+    v4l2_device.on_data = [&drm_device, &renderer](V4l2Device::user_buffers_t& buf, v4l2_buffer& vbuf) {
+        static bool bound_context = false;
+        if (!bound_context) {
+            if (!renderer.bind_context_to_thread()) {
+                std::cerr << "Failed to bind EGL context to thread" << std::endl;
+                return;
+            }
+            bound_context = true;
+        }
+
+        test_draw();
+        renderer.prepare_read();
+
+        gbm_bo* cur_bo = renderer.read_lock();
+        if (!cur_bo) {
+            std::cerr << "Failed to lock front buffer" << std::endl;
+            return;
+        }
+
+        // create framebuffer from the bo
+        uint32_t canvas_fb_id = drm_device.import_canvas_buf_bo(cur_bo);
+
+        drm_device.display(buf.index, canvas_fb_id);
+
+        drmVBlank vbl = {};
+        vbl.request.type = (drmVBlankSeqType)DRM_VBLANK_RELATIVE;
+        vbl.request.sequence = 1; // wait for the next vblank
+        if(int ret = drmWaitVBlank(drm_device.drm_fd, &vbl); ret) {
+            std::cerr << "Failed to wait for vblank: " << strerror(-ret) << std::endl;
+        }
+        
+        renderer.read_unlock(cur_bo);
 
         static FreqMonitor freq_monitor("Main");
         freq_monitor.increment();
 
-        TwoDimensionalBuffer buf2d (drm_device.dumb_buf_ptr, drm_device.dumb_buf_size, drm_device.width, drm_device.height);
-        memset(drm_device.dumb_buf_ptr, 0x00, drm_device.dumb_buf_size); // make transparent
-        // draw a pattern
-        static int count = 0;
-        count ++;
-        count %= 640;
-        for (int y = 0; y < 128; y++) {
-            for (int x = 0; x < 128; x++) {
-                unsigned char* pixel = buf2d.get(x+count, y+count);
-                if (pixel) {
-                    pixel[0] = count; // R
-                    pixel[1] = count * 2; // G
-                    pixel[2] = count * 3; // B
-                    pixel[3] = 0xFF;  // A
-                }
-            }
-        }
+        /*
+        */
     };
 
     while(!caught_interruption) {
-        usleep(10000); // 10ms
+        usleep(20*1000); // 20ms
     }
 
     v4l2_device.on_data = nullptr;
@@ -139,4 +127,90 @@ int main(int argc, char** argv) {
     sleep(1); // dirty: give some time for deamon threads to finish
 
     return 0;
+}
+
+
+void dump_config(EGLDisplay egl_display, EGLConfig config) {
+		// dump attributes of each config
+		EGLint attribs[16]{};
+		eglGetConfigAttrib(egl_display, config, EGL_RED_SIZE, &attribs[0]);
+		eglGetConfigAttrib(egl_display, config, EGL_GREEN_SIZE, &attribs[1]);
+		eglGetConfigAttrib(egl_display, config, EGL_BLUE_SIZE, &attribs[2]);
+		eglGetConfigAttrib(egl_display, config, EGL_ALPHA_SIZE, &attribs[3]);
+
+		eglGetConfigAttrib(egl_display, config, EGL_BUFFER_SIZE, &attribs[4]);
+		eglGetConfigAttrib(egl_display, config, EGL_DEPTH_SIZE, &attribs[5]);
+
+
+		eglGetConfigAttrib(egl_display, config, EGL_CONFIG_ID, &attribs[6]);
+		eglGetConfigAttrib(egl_display, config, EGL_LEVEL, &attribs[7]);
+		eglGetConfigAttrib(egl_display, config, EGL_RENDERABLE_TYPE, &attribs[8]);
+		eglGetConfigAttrib(egl_display, config, EGL_SURFACE_TYPE, &attribs[9]);
+
+		eglGetConfigAttrib(egl_display, config, EGL_NATIVE_RENDERABLE, &attribs[10]);
+		eglGetConfigAttrib(egl_display, config, EGL_NATIVE_VISUAL_ID, &attribs[11]);
+		eglGetConfigAttrib(egl_display, config, EGL_NATIVE_VISUAL_TYPE, &attribs[12]);
+
+		char visual_id[5]{};
+		memcpy(visual_id, &attribs[11], 4);
+		visual_id[4] = '\0';
+
+		std::cout
+			<< "Config ID: " << attribs[6] << ", "
+			<< "RGBA: " << attribs[0] << ":"
+			<< attribs[1] << ":"
+			<< attribs[2] << ":"
+			<< attribs[3] << ", "
+			<< "Buffer: " << attribs[4] << ", "
+			<< "Depth: " << attribs[5] << ", "
+			<< "Level: " << attribs[7] << ", "
+			<< "Renderable Type: " << std::hex << attribs[8] << ", "
+			<< "Surface Type: " << std::hex << attribs[9] << ", "
+			// << "Native Renderable: " << attribs[10] << ", "
+			<< "Visual ID: " << visual_id << ", "
+			<< "Visual Type: " <<  std::hex << attribs[12]
+			<< std::endl;
+}
+
+
+void test_draw() {
+    glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+    float vertices[] = {
+        -0.5f, -0.5f,
+        0.5f, -0.5f,
+        0.0f,  0.5f
+    };
+    glEnableClientState(GL_VERTEX_ARRAY);
+    glVertexPointer(2, GL_FLOAT, 0, vertices);
+    glColor4f(0.0f, 1.0f, 0.0f, 1.0f); // 绿色
+    glDrawArrays(GL_TRIANGLES, 0, 3);
+    glDisableClientState(GL_VERTEX_ARRAY);
+    glFlush();
+
+    GLenum err = glGetError();
+    if (err != GL_NO_ERROR) {
+        std::cerr << "OpenGL error: " << err << std::endl;
+    }
+}
+
+void test_draw_dumb(DRMDevice& drm_device) {
+    TwoDimensionalBuffer buf2d (drm_device.dumb_buf_ptr, drm_device.dumb_buf_size, drm_device.width, drm_device.height);
+    memset(drm_device.dumb_buf_ptr, 0x00, drm_device.dumb_buf_size); // make transparent
+    // draw a pattern
+    static int count = 0;
+    count ++;
+    count %= 640;
+    for (int y = 0; y < 128; y++) {
+        for (int x = 0; x < 128; x++) {
+            unsigned char* pixel = buf2d.get(x+count, y+count);
+            if (pixel) {
+                pixel[0] = count; // R
+                pixel[1] = count * 2; // G
+                pixel[2] = count * 3; // B
+                pixel[3] = 0xFF;  // A
+            }
+        }
+    }
 }

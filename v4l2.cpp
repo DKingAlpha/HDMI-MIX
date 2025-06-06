@@ -37,7 +37,7 @@ bool V4l2Device::open_not_closing_on_failure() {
         std::cerr << "Failed to get video format" << std::endl;
         return false;
     }
-    std::cout << "Current video format: " << fmt.fmt.pix_mp.width << "x" 
+    std::cout << "Input video format: " << fmt.fmt.pix_mp.width << "x" 
               << fmt.fmt.pix_mp.height << ", pixel format: "
               << (char)(fmt.fmt.pix_mp.pixelformat & 0xFF) 
               << (char)((fmt.fmt.pix_mp.pixelformat >> 8) & 0xFF)
