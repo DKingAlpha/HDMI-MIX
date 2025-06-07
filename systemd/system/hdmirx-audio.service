@@ -1,0 +1,7 @@
+[Unit]
+Description=Forward hdmirx audio
+
+[Service]
+Type=simple
+
+ExecStart=/usr/bin/gst-launch-1.0 alsasrc device=hw:3,0 ! audioconvert ! audioresample ! queue !  alsasink device="hw:0,0"

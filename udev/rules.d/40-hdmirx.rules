@@ -1,0 +1,6 @@
+# hdmirx plug in
+
+ACTION=="change", SUBSYSTEM=="extcon", ATTR{state}=="VIDEO-IN=1", TAG+="systemd", ENV{SYSTEMD_WANTS}+="hdmirx-audio.service", ENV{SYSTEMD_WANTS}+="hdmirx-video.service"
+
+# hdmirx plug out
+ACTION=="change", SUBSYSTEM=="extcon", ATTR{state}=="VIDEO-IN=0", RUN{program}+="/usr/bin/systemctl stop hdmirx-audio.service", RUN{program}+="/usr/bin/systemctl stop hdmirx-video.service"

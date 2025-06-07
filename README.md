@@ -72,9 +72,13 @@ NPU load:  Core0: 51%, Core1:  0%, Core2:  0%,
 1. kernel <= 6.1, large cma in kernel paramter like `cma=1024M`
     * hdmirx is broken on kernel 6.1x !
 2. install `libv4l2-dev`, `libdrm-dev` and other missing dev dependencies.
+    * `apt-file search <MISING_FILE>` to find the package.
 3. recompile and install mesa. armbian mesa is broken for some reason. recompile librga to get rid of spamming IM_LOG_FORCE message.
 4. clone imgui to current directory, download `3rdparty/` and `model/` from `rknn_model_zoo`
 5. cmake and run.
+6. [optional] install files from `systemd/` and `udev/`, to auto run on hdmi-in plug event.
+    * `systemctl daemon-reload`
+    * `udevadm control -R`
 
 ## why such a mess
 

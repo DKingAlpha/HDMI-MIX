@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.10)
 
-project(hdmimix_yolo LANGUAGES C CXX)
+project(hdmimix LANGUAGES C CXX)
 
 set(TARGET_SOC "rk3588" CACHE STRING "Target SoC, e.g., rk3588, rv1106, rv1103, rv1103b, rv1109, rv1126, rk1808")
 
