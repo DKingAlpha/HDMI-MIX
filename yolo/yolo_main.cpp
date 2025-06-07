@@ -78,11 +78,8 @@ bool yolo_main_on_frame(int v2ld_dma_fd, int width, int height, image_format_t i
         sprintf(text, "%s %.1f%%", coco_cls_to_name(det_result->cls_id), det_result->prop * 100);
         drawlist->AddRect(ImVec2(x1, y1), ImVec2(x2, y2), IM_COL32(0, 255, 0, 255), 0.0f, ImDrawFlags_RoundCornersAll, 3.0f);
         drawlist->AddText(nullptr, 128, ImVec2(x1, y1 - 128), IM_COL32(255, 0, 0, 255), text);
-        // draw_rectangle(&src_image, x1, y1, x2 - x1, y2 - y1, COLOR_GREEN, 3);
-        // draw_text(&src_image, text, x1, y1 - 20, COLOR_RED, 10);
     }
 
-    // write_image("out.png", &src_image);
     return true;
 }
 

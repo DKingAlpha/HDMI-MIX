@@ -2,14 +2,83 @@
 
 HDMI-IN to HDMI-OUT mixer for RK3588.
 
+REAL TIME & LOW LATENCY.
+
 * libv4l2 for hdmirx
 * libdrm for hdmiout. DMABUF x4.
 * gbm/egl/gles3.1 for rendering
 * imgui for UI.
+* yolo for AI overlay.
+
+
+![img](doc/demo.jpg)
+
+## Performance
+
+Smooth on 4K@60Hz!
+
+Input FPS should be 60.01Hz
+
+Output Refresh Rate with ImGUI. 
+
+```
+-----------------------------
+FPS: 60.001
+Jitter: 0%
+MaxDev: 0.0106587ms
+StdDev: 0.00329361ms
+
+-----------------------------
+FPS: 60.0008
+Jitter: 0%
+MaxDev: 0.0156167ms
+StdDev: 0.00524ms
+
+-----------------------------
+FPS: 60.0007
+Jitter: 0%
+MaxDev: 0.0129917ms
+StdDev: 0.0028702ms
+```
+
+Yolo11 Object Detection on 4K: `~30Hz (in separate thread)`
+
+Avg Load:
+
+```
+RGA:
+
+num of scheduler = 3
+================= load ==================
+scheduler[0]: rga3
+         load = 18%
+-----------------------------------
+scheduler[1]: rga3
+         load = 0%
+-----------------------------------
+scheduler[2]: rga2
+         load = 0%
+-----------------------------------
+=========================================
+
+
+NPU:
+
+NPU load:  Core0: 51%, Core1:  0%, Core2:  0%,
+```
+
+## How to use
+
+1. kernel <= 6.1, large cma in kernel paramter like `cma=1024M`
+    * hdmirx is broken on kernel 6.1x !
+2. install `libv4l2-dev`, `libdrm-dev` and other missing dev dependencies.
+3. recompile and install mesa. armbian mesa is broken for some reason. recompile librga to get rid of spamming IM_LOG_FORCE message.
+4. clone imgui to current directory, download `3rdparty/` and `model/` from `rknn_model_zoo`
+5. cmake and run.
 
 ## why such a mess
 
-RK3588 has special hardwares:
+RK3588 has special hardware:
 
 1. v4l2 hdmirx reports:
     * capabilities: MPLANES | STREAMING_IO
@@ -35,39 +104,3 @@ RK3588 has special hardwares:
 5. gbm: create a buffer and pass to egl to create a surface, and import gbm_bo to DRM as a framebuffer.
 6. egl: find proper config, set up context with the best GL version.
 7. imgui: render UI with gl* API, it goes to "current" context and thats the one we just set up.
-
-## Performance
-
-Smooth on 4K@60Hz!
-
-Refresh rate with imgui. Input FPS should be 60.01Hz
-
-```
------------------------------
-FPS: 60.001
-Jitter: 0%
-MaxDev: 0.0106587ms
-StdDev: 0.00329361ms
-
------------------------------
-FPS: 60.0008
-Jitter: 0%
-MaxDev: 0.0156167ms
-StdDev: 0.00524ms
-
------------------------------
-FPS: 60.0007
-Jitter: 0%
-MaxDev: 0.0129917ms
-StdDev: 0.0028702ms
-```
-
-## How to use
-
-1. kernel <= 6.1, large cma in kernel paramter like `cma=1024M`
-    * hdmirx is broken on kernel 6.1x !
-2. install `libv4l2-dev`, `libdrm-dev` and other missing dev dependencies.
-3. recompile and install mesa. armbian mesa is broken for some reason.
-4. clone imgui to current directory:
-5. `make`
-6. run `hdmimix`.
