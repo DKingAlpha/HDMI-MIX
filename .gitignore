@@ -1,7 +1,12 @@
-/hdmimix
 *.log
-*.o
-/imgui_addon/example_passthrough_opengl3/example_passthrough_opengl3
+*.tar.gz
+*.zip
+*.tgz
+**/*.o
+/build
+/librga
 /imgui
-/imgui.ini
 /main
+/model
+imgui.ini
+

@@ -66,6 +66,10 @@
         "set": "cpp",
         "chrono": "cpp",
         "iomanip": "cpp",
-        "sstream": "cpp"
+        "sstream": "cpp",
+        "complex": "c",
+        "math.h": "c",
+        "list": "cpp",
+        "fstream": "cpp"
     }
 }

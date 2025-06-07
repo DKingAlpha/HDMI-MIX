@@ -17,6 +17,8 @@
 #include <GL/glx.h>
 #include <GL/glxext.h>
 
+#include "common.h"
+
 #include <mutex>
 #include <condition_variable>
 
@@ -24,14 +26,12 @@ class WaitSignal {
 public:
     WaitSignal() : signaled_(false) {}
     
-    // 等待信号
     void wait() {
         std::unique_lock<std::mutex> lock(mutex_);
         cv_.wait(lock, [this] { return signaled_; });
-        signaled_ = false; // 重置信号状态，以便下次等待
+        signaled_ = false;
     }
     
-    // 发送信号（唤醒一个等待线程）
     void signal() {
         {
             std::lock_guard<std::mutex> lock(mutex_);
@@ -40,7 +40,6 @@ public:
         cv_.notify_one();
     }
     
-    // 广播信号（唤醒所有等待线程）
     void broadcast() {
         {
             std::lock_guard<std::mutex> lock(mutex_);
@@ -83,9 +82,16 @@ void signal_handler(int signum) {
 
 extern void imgui_main_pre(int width, int height);
 extern void imgui_main_post();
-extern void imgui_main_on_frame();
+extern void imgui_main_begin_frame();
+extern void imgui_main_end_frame();
+
+extern bool yolo_main_pre(const char *model_path, const char* label_list_file);
+extern bool yolo_main_on_frame(int v2ld_dma_fd, int width, int height, image_format_t imgfmt);
+extern void yolo_main_post();
 
 int main(int argc, char** argv) {
+    yolo_main_pre("./model/yolo11.rknn", "./model/coco_80_labels_list.txt");
+
     struct sigaction sigact;
     sigact.sa_handler = signal_handler;
     
@@ -116,7 +122,13 @@ int main(int argc, char** argv) {
     WaitSignal ws_release;
     uint32_t canvas_fb_id = 0;
 
-    std::thread render_th([&drm_device, &renderer, &v4l2_device, &ws_release, &canvas_fb_id]() {
+
+    if (v4l2_device.pixfmt == V4L2_PIX_FMT_NV24) {
+        printf("NV24 is not supported, manually transcode to NV12 first\n");
+    }
+
+    int last_dma_index = -1;
+    std::thread render_th([&drm_device, &renderer, &v4l2_device, &ws_release, &canvas_fb_id, &last_dma_index]() {
         if (!renderer.bind_context_to_thread()) {
             std::cerr << "Failed to bind EGL context to thread" << std::endl;
             run_loop = false;
@@ -125,7 +137,14 @@ int main(int argc, char** argv) {
         imgui_main_pre(v4l2_device.width, v4l2_device.height);
 
         while (run_loop) {
-            imgui_main_on_frame();
+            static FreqMonitor freq_monitor("IMGUI");
+            freq_monitor.increment();
+
+            imgui_main_begin_frame();
+            if (last_dma_index >= 0 && v4l2_device.pixfmt == V4L2_PIX_FMT_NV12) {
+                yolo_main_on_frame(v4l2_device.buffers[last_dma_index].mem[0].dma_fd, v4l2_device.width, v4l2_device.height, IMAGE_FORMAT_YUV420SP_NV12);
+            }
+            imgui_main_end_frame();
             renderer.swap_buffer();
             gbm_bo* cur_bo = renderer.read_lock();
 
@@ -139,25 +158,13 @@ int main(int argc, char** argv) {
 
     sleep(1); // dirty: wait for renderer to get ready
 
-    v4l2_device.stream_on(run_loop, [&drm_device, &renderer, &ws_release, &canvas_fb_id]
+    v4l2_device.stream_on(run_loop, [&drm_device, &renderer, &ws_release, &canvas_fb_id, &last_dma_index]
         (V4l2Device::user_buffers_t& buf, v4l2_buffer& vbuf) {
-        // static FreqMonitor freq_monitor("Main");
-        // freq_monitor.increment();
         static FrameJitterMeasurer jitterMeasurer(60.0, 60);
         jitterMeasurer.markFrame();
+        jitterMeasurer.print();
 
-        static auto lastPrint = std::chrono::high_resolution_clock::now();
-        auto now = std::chrono::high_resolution_clock::now();
-        if (std::chrono::duration<double>(now - lastPrint).count() >= 1.0) {
-            auto metrics = jitterMeasurer.getMetrics();
-            std::cout << "-----------------------------\n"
-                      << "FPS: " << metrics.averageFps << "\n"
-                      << "Jitter: " << metrics.jitterRate << "%\n"
-                      << "MaxDev: " << metrics.maxDeviation << "ms\n"
-                      << "StdDev: " << metrics.stdDev << "ms\n\n";
-            lastPrint = now;
-        }
-
+        last_dma_index = buf.index;
         drm_device.display(buf.index, canvas_fb_id);
 
         drmVBlank vbl = {};
@@ -168,6 +175,8 @@ int main(int argc, char** argv) {
         }
         ws_release.signal();
     });
+
+    render_th.join();
 
     imgui_main_post();
 
@@ -183,6 +192,8 @@ int main(int argc, char** argv) {
     v4l2_device.close();
     usleep(100*1000);
     
+    yolo_main_post();
+
     return 0;
 }
 

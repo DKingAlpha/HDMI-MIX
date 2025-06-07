@@ -342,6 +342,35 @@ uint32_t DRMDevice::import_canvas_buf_bo(gbm_bo* bo)
     }
 
 	drmModeSetCrtc(drm_fd, crtc_id, canvas_fb_id, 0, 0, &conn_id, 1, mode);
+    
+
+    drmModeAtomicReqPtr req = drmModeAtomicAlloc();
+    if (!req) {
+        std::cerr << "Failed to allocate atomic request" << std::endl;
+        return false;
+    }
+    uint32_t plane_id = plane_id_canvas;
+    drmModeAtomicAddProperty(req, plane_id, panel_prop_ids[plane_id]["CRTC_ID"], crtc_id);
+    drmModeAtomicAddProperty(req, plane_id, panel_prop_ids[plane_id]["FB_ID"], canvas_fb_id);
+    drmModeAtomicAddProperty(req, plane_id, panel_prop_ids[plane_id]["CRTC_X"], 0);
+    drmModeAtomicAddProperty(req, plane_id, panel_prop_ids[plane_id]["CRTC_Y"], 0);
+    drmModeAtomicAddProperty(req, plane_id, panel_prop_ids[plane_id]["CRTC_W"], width);
+    drmModeAtomicAddProperty(req, plane_id, panel_prop_ids[plane_id]["CRTC_H"], height);
+    drmModeAtomicAddProperty(req, plane_id, panel_prop_ids[plane_id]["SRC_X"], 0);
+    drmModeAtomicAddProperty(req, plane_id, panel_prop_ids[plane_id]["SRC_Y"], 0);
+    drmModeAtomicAddProperty(req, plane_id, panel_prop_ids[plane_id]["SRC_W"], width << 16);
+    drmModeAtomicAddProperty(req, plane_id, panel_prop_ids[plane_id]["SRC_H"], height << 16);
+    drmModeAtomicAddProperty(req, plane_id, panel_prop_ids[plane_id]["CRTC_VISIBLE"], 1);
+    // alpha
+    drmModeAtomicAddProperty(req, plane_id, panel_prop_ids[plane_id]["alpha"], 65535);
+    drmModeAtomicAddProperty(req, plane_id, panel_prop_ids[plane_id]["zpos"], 11);
+    ret = drmModeAtomicCommit(drm_fd, req, DRM_MODE_ATOMIC_ALLOW_MODESET | DRM_MODE_ATOMIC_NONBLOCK, nullptr);
+    drmModeAtomicFree(req);
+    if (ret < 0 && ret != -EBUSY) {
+        // a few EBUSY is normal.
+        std::cerr << "Failed to commit atomic request: " << strerror(-ret) << std::endl;
+        return false;
+    }
 
     return canvas_fb_id;
 }

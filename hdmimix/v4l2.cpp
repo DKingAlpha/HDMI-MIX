@@ -37,12 +37,12 @@ bool V4l2Device::open_not_closing_on_failure() {
         std::cerr << "Failed to get video format" << std::endl;
         return false;
     }
+    
+    char s_pixfmt[5] = {0};
+    memcmp(s_pixfmt, &fmt.fmt.pix_mp.pixelformat, 4);
+    s_pixfmt[4] = '\0';
     std::cout << "Input video format: " << fmt.fmt.pix_mp.width << "x" 
-              << fmt.fmt.pix_mp.height << ", pixel format: "
-              << (char)(fmt.fmt.pix_mp.pixelformat & 0xFF) 
-              << (char)((fmt.fmt.pix_mp.pixelformat >> 8) & 0xFF)
-              << (char)((fmt.fmt.pix_mp.pixelformat >> 16) & 0xFF)
-              << (char)((fmt.fmt.pix_mp.pixelformat >> 24) & 0xFF) << std::endl;
+              << fmt.fmt.pix_mp.height << ", pixel format: " << s_pixfmt << std::endl;
     
     pixfmt = fmt.fmt.pix_mp.pixelformat;
     width = fmt.fmt.pix_mp.width;

@@ -38,7 +38,7 @@ public:
         uint64_t current_time = get_current_time();
         if (current_time - last_print_time >= interval_ms) {
             float freq = count * 1000.0 / (current_time - last_print_time);
-            printf("Frequency: %s %.2fHz\n", name.c_str(), freq);
+            printf("[%s] Frequency: %.2fHz\n", name.c_str(), freq);
             count = 0;
             last_print_time = current_time;
         }
@@ -61,6 +61,7 @@ public:
     FrameJitterMeasurer(double targetFps = 60.0, size_t maxStoredFrames = 300) 
         : targetFrameTime(1000.0 / targetFps), 
           lastFrameTime(std::chrono::high_resolution_clock::now()),
+          lastPrint(std::chrono::high_resolution_clock::now()),
           maxStoredFrames(maxStoredFrames),
           frameTimes(maxStoredFrames, 1000.0 / targetFps) {}
 
@@ -77,6 +78,19 @@ public:
         }
         
         lastFrameTime = now;
+    }
+
+    void print() {
+        auto now = std::chrono::high_resolution_clock::now();
+        if (std::chrono::duration<double>(now - lastPrint).count() >= 1.0) {
+            auto metrics = getMetrics();
+            std::cout << "-----------------------------\n"
+                      << "FPS: " << metrics.averageFps << "\n"
+                      << "Jitter: " << metrics.jitterRate << "%\n"
+                      << "MaxDev: " << metrics.maxDeviation << "ms\n"
+                      << "StdDev: " << metrics.stdDev << "ms\n\n";
+            lastPrint = now;
+        }
     }
 
     // Get current jitter metrics
@@ -133,6 +147,7 @@ public:
 private:
     const double targetFrameTime;  // Target frame time in milliseconds (16.666...ms for 60FPS)
     std::chrono::high_resolution_clock::time_point lastFrameTime;
+    std::chrono::high_resolution_clock::time_point lastPrint;
     std::vector<double> frameTimes; // Stores frame times in milliseconds
     
     const size_t maxStoredFrames; // Store up to 10 seconds at 60FPS

@@ -70,14 +70,15 @@ void imgui_main_post()
     ImGui::DestroyContext();
 }
 
+static ImVec4 clear_color = ImVec4(.0f, .0f, .0f, .0f);
+
 // Main code
-void imgui_main_on_frame()
+void imgui_main_begin_frame()
 {
     ImGui_ImplPassThrough_NewFrame();
     // Our state
-    static bool show_demo_window = true;
+    static bool show_demo_window = false;
     static bool show_another_window = false;
-    static ImVec4 clear_color = ImVec4(.0f, .0f, .0f, .0f);
 
     ImGuiIO& io = ImGui::GetIO(); (void)io;
     
@@ -90,7 +91,7 @@ void imgui_main_on_frame()
         ImGui::ShowDemoWindow(&show_demo_window);
 
     // 2. Show a simple window that we create ourselves. We use a Begin/End pair to create a named window.
-    {
+    if (false) {
         static float f = 0.0f;
         static int counter = 0;
 
@@ -122,6 +123,10 @@ void imgui_main_on_frame()
         ImGui::End();
     }
 
+}
+
+
+void imgui_main_end_frame() {
     // Rendering
     ImGui::Render();
     glClearColor(clear_color.x * clear_color.w, clear_color.y * clear_color.w, clear_color.z * clear_color.w, clear_color.w);

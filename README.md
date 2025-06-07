@@ -67,6 +67,7 @@ StdDev: 0.0028702ms
 1. kernel <= 6.1, large cma in kernel paramter like `cma=1024M`
     * hdmirx is broken on kernel 6.1x !
 2. install `libv4l2-dev`, `libdrm-dev` and other missing dev dependencies.
-3. clone imgui to current directory:
-4. `make`
-5. run `hdmimix`.
+3. recompile and install mesa. armbian mesa is broken for some reason.
+4. clone imgui to current directory:
+5. `make`
+6. run `hdmimix`.
