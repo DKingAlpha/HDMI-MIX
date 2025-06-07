@@ -40,46 +40,26 @@ RK3588 has special hardwares:
 
 Smooth on 4K@60Hz!
 
-
-HDMI-OUT without imgui
-
-```
------------------------------
-FPS: 60.0001
-Jitter: 0%
-MaxDev: 0.131808ms
-StdDev: 0.0110157ms
-
------------------------------
-FPS: 60.0003
-Jitter: 0%
-MaxDev: 0.131808ms
-StdDev: 0.0107109ms
-```
-
-HDMI-OUT with synced imgui rendering
+Refresh rate with imgui. Input FPS should be 60.01Hz
 
 ```
-Frequency: Main 60.00Hz
 -----------------------------
-FPS: 59.9986
+FPS: 60.001
 Jitter: 0%
-MaxDev: 0.0339733ms
-StdDev: 0.0051967ms
+MaxDev: 0.0106587ms
+StdDev: 0.00329361ms
 
 -----------------------------
-FPS: 59.9984
+FPS: 60.0008
 Jitter: 0%
-MaxDev: 0.0561393ms
-StdDev: 0.00577705ms
+MaxDev: 0.0156167ms
+StdDev: 0.00524ms
 
 -----------------------------
-FPS: 59.9984
+FPS: 60.0007
 Jitter: 0%
-MaxDev: 0.0561393ms
-StdDev: 0.0057784ms
-
------------------------------
+MaxDev: 0.0129917ms
+StdDev: 0.0028702ms
 ```
 
 ## How to use

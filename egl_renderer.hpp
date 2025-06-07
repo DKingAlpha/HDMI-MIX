@@ -119,7 +119,10 @@ public:
         return true;
     }
 
-    bool prepare_read() {
+    /**
+     * must be called from the same thread that called bind_context_to_thread
+     */
+    bool swap_buffer() {
 		if (!eglSwapBuffers(egl_display, egl_surface)) {
 			std::cerr << "Failed to swap buffers, err: " << std::hex << eglGetError() << std::endl;
 			return false;

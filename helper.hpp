@@ -58,11 +58,11 @@ public:
 
 class FrameJitterMeasurer {
 public:
-    FrameJitterMeasurer(double targetFps = 60.0) 
+    FrameJitterMeasurer(double targetFps = 60.0, size_t maxStoredFrames = 300) 
         : targetFrameTime(1000.0 / targetFps), 
-          lastFrameTime(std::chrono::high_resolution_clock::now()) {
-        frameTimes.reserve(300); // Reserve space for 5 seconds of frames at 60 FPS
-    }
+          lastFrameTime(std::chrono::high_resolution_clock::now()),
+          maxStoredFrames(maxStoredFrames),
+          frameTimes(maxStoredFrames, 1000.0 / targetFps) {}
 
     // Call this at the beginning or end of each frame
     void markFrame() {
@@ -99,10 +99,10 @@ public:
         double averageFrameTime = sum / frameTimes.size();
         metrics.averageFps = 1000.0 / averageFrameTime;
 
-        // Calculate jitter (frames that deviate more than 10% from target)
+        // Calculate jitter (frames that deviate more than 1% from target)
         size_t jitterCount = std::count_if(frameTimes.begin(), frameTimes.end(), 
             [this](double t) { 
-                return std::abs(t - targetFrameTime) > (targetFrameTime * 0.1); 
+                return std::abs(t - targetFrameTime) > (targetFrameTime * 0.01); 
             });
         metrics.jitterRate = (static_cast<double>(jitterCount) / frameTimes.size()) * 100.0;
 
@@ -135,5 +135,5 @@ private:
     std::chrono::high_resolution_clock::time_point lastFrameTime;
     std::vector<double> frameTimes; // Stores frame times in milliseconds
     
-    static const size_t maxStoredFrames = 600; // Store up to 10 seconds at 60FPS
+    const size_t maxStoredFrames; // Store up to 10 seconds at 60FPS
 };

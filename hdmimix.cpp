@@ -4,6 +4,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <iostream>
+#include <thread>
 #include <memory.h>
 #include <sys/mman.h>
 #include <signal.h>
@@ -15,6 +16,44 @@
 #include <GL/gl.h>
 #include <GL/glx.h>
 #include <GL/glxext.h>
+
+#include <mutex>
+#include <condition_variable>
+
+class WaitSignal {
+public:
+    WaitSignal() : signaled_(false) {}
+    
+    // 等待信号
+    void wait() {
+        std::unique_lock<std::mutex> lock(mutex_);
+        cv_.wait(lock, [this] { return signaled_; });
+        signaled_ = false; // 重置信号状态，以便下次等待
+    }
+    
+    // 发送信号（唤醒一个等待线程）
+    void signal() {
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            signaled_ = true;
+        }
+        cv_.notify_one();
+    }
+    
+    // 广播信号（唤醒所有等待线程）
+    void broadcast() {
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            signaled_ = true;
+        }
+        cv_.notify_all();
+    }
+
+private:
+    std::mutex mutex_;
+    std::condition_variable cv_;
+    bool signaled_;
+};
 
 void dump_config(EGLDisplay egl_display, EGLConfig config);
 void test_draw();
@@ -74,24 +113,37 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    if (!renderer.bind_context_to_thread()) {
-        std::cerr << "Failed to bind EGL context to thread" << std::endl;
-        return 1;
-    }
+    WaitSignal ws_release;
+    uint32_t canvas_fb_id = 0;
 
-    const char* version = (const char*)glGetString(GL_VERSION);
-    if (!version) {
-        printf("OpenGL not initialized! EGL error: 0x%X\n", eglGetError());
-    }
-    printf("OpenGL version: %s\n", version);
+    std::thread render_th([&drm_device, &renderer, &v4l2_device, &ws_release, &canvas_fb_id]() {
+        if (!renderer.bind_context_to_thread()) {
+            std::cerr << "Failed to bind EGL context to thread" << std::endl;
+            run_loop = false;
+            return;
+        }
+        imgui_main_pre(v4l2_device.width, v4l2_device.height);
 
-    imgui_main_pre(v4l2_device.width, v4l2_device.height);
+        while (run_loop) {
+            imgui_main_on_frame();
+            renderer.swap_buffer();
+            gbm_bo* cur_bo = renderer.read_lock();
 
+            // create framebuffer from the bo
+            canvas_fb_id = drm_device.import_canvas_buf_bo(cur_bo);
 
-    v4l2_device.stream_on(run_loop, [&drm_device, &renderer](V4l2Device::user_buffers_t& buf, v4l2_buffer& vbuf) {
-        static FreqMonitor freq_monitor("Main");
-        static FrameJitterMeasurer jitterMeasurer(60.0);
-        freq_monitor.increment();
+            ws_release.wait();
+            renderer.read_unlock(cur_bo); // unlock the bo for the next frame
+        }
+    });
+
+    sleep(1); // dirty: wait for renderer to get ready
+
+    v4l2_device.stream_on(run_loop, [&drm_device, &renderer, &ws_release, &canvas_fb_id]
+        (V4l2Device::user_buffers_t& buf, v4l2_buffer& vbuf) {
+        // static FreqMonitor freq_monitor("Main");
+        // freq_monitor.increment();
+        static FrameJitterMeasurer jitterMeasurer(60.0, 60);
         jitterMeasurer.markFrame();
 
         static auto lastPrint = std::chrono::high_resolution_clock::now();
@@ -106,18 +158,6 @@ int main(int argc, char** argv) {
             lastPrint = now;
         }
 
-        imgui_main_on_frame();
-        renderer.prepare_read();
-
-        gbm_bo* cur_bo = renderer.read_lock();
-        if (!cur_bo) {
-            std::cerr << "Failed to lock front buffer" << std::endl;
-            return;
-        }
-
-        // create framebuffer from the bo
-        uint32_t canvas_fb_id = drm_device.import_canvas_buf_bo(cur_bo);
-
         drm_device.display(buf.index, canvas_fb_id);
 
         drmVBlank vbl = {};
@@ -126,8 +166,7 @@ int main(int argc, char** argv) {
         if(int ret = drmWaitVBlank(drm_device.drm_fd, &vbl); ret) {
             std::cerr << "Failed to wait for vblank: " << strerror(-ret) << std::endl;
         }
-        
-        renderer.read_unlock(cur_bo);
+        ws_release.signal();
     });
 
     imgui_main_post();

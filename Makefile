@@ -30,6 +30,9 @@ endif
 %.o:%.cpp
 	$(CXX) $(CXXFLAGS) -c -o $@ $<
 
+%.o:backends/%.cpp
+	$(CXX) $(CXXFLAGS) -c -o $@ $<
+
 %.o:$(IMGUI_DIR)/%.cpp
 	$(CXX) $(CXXFLAGS) -c -o $@ $<
 
